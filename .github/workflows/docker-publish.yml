@@ -1,0 +1,101 @@
+name: Publish Docker Image
+
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+on:
+  schedule:
+    - cron: '37 8 1,15 * *'
+  push:
+    branches: [ master ]
+    paths-ignore: [ '.github/**' ]
+  pull_request:
+    branches: [ master ]
+  # workflow_dispatch:
+
+env:
+  # Use docker.io for Docker Hub if empty
+  REGISTRY: ghcr.io
+  # github.repository as <account>/<repo>
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    permissions:
+      # contents: read
+      packages: write
+
+    steps:
+      # Login against a Docker registry except on PR
+      # https://github.com/docker/login-action
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2.0.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata (tags, labels) for Docker
+      # https://github.com/docker/metadata-action
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v4.0.1
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # set latest tag for master branch
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Retrieve all repository tags from the GitHub API using undocumented API call to get all tags
+      # https://github.com/actions/github-script
+      - name: Get all tags
+        id: all-tags
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const path = "/repos/" + "${{ github.repository }}" + "/tags"
+            const parameters = "{'" + "${{ github.repository_owner }}" + "', '" + "${{ github.repository }}" + "'}"
+            return github.rest.git.getTag(path,parameters)
+      
+      # Prepare JSON output for Unix command line
+      # https://github.com/mad9000/actions-find-and-replace-string
+      - name: Format jq result
+        id: formatted-jq
+        uses: mad9000/actions-find-and-replace-string@2
+        with:
+          source: ${{ steps.all-tags.outputs.result }}
+          find: "'"
+          replace: "\\\'"
+
+      # Parse Github API output and search for tags only matching the current commit SHA 
+      - name: Search all tags for commit
+        id: tag-results
+        run: echo ::set-output name=tags::"$( echo '${{ steps.formatted-jq.outputs.value }}' | jq -r ".data | .[] | select( .commit.sha == \"${{ github.sha }}\" ) | .name" )"
+      
+      # Merge the tag lists from docker/metadata-action and GitHub API
+      - name: Build tag list
+        id: tag-list
+        run: |
+          echo ::set-output name=tags::"$(
+            echo -n "${{ steps.meta.outputs.tags }}" | tr '\n' ','
+            for r in `echo "${{ steps.tag-results.outputs.tags }}" | tr '\n' ' '`; do echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$r | tr '[:upper:]' '[:lower:]'; done
+          )"
+
+      # Build and push Docker image with Buildx (don't push on PR)
+      # https://github.com/docker/build-push-action
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3.0.0
+        with:
+          # context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tag-list.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

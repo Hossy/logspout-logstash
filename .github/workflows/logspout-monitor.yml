@@ -1,0 +1,36 @@
+name: Logspout Monitor
+on:
+  schedule:
+    - cron:  '0 8 * * *'
+  workflow_dispatch:
+jobs:
+  check-logspout-version:
+    runs-on: ubuntu-latest
+    steps:
+      # https://github.com/actions/checkout
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        # https://stackoverflow.com/questions/67550727/push-event-doesnt-trigger-workflow-on-push-paths-github-actions
+        with:
+          token: ${{ secrets.BUILD_AUTOMATION_TOKEN }}
+
+      - name: Fetch latest release version of Logspout
+        id: logspout_ver
+        run: |
+          curl -sL https://api.github.com/repos/gliderlabs/logspout/releases/latest | \
+          jq -r ".tag_name" > logspout-latest.txt
+          echo ::set-output name=logspout-latest::$(cat logspout-latest.txt)
+
+      - name: Check for modified files
+        id: git-check
+        run: echo ::set-output name=modified::$([ -z "`git status --porcelain`" ] && echo "false" || echo "true")
+
+      - name: Commit latest release version
+        if: steps.git-check.outputs.modified == 'true'
+        run: |
+          git config --global user.name 'Hossy'
+          git config --global user.email 'Hossy@users.noreply.github.com'
+          git commit -am "New Logspout release ${{ steps.logspout_ver.outputs.logspout-latest }}"
+          git tag -am "Logspout ${{ steps.logspout_ver.outputs.logspout-latest }}" logspout-${{ steps.logspout_ver.outputs.logspout-latest }}
+          git push origin logspout-${{ steps.logspout_ver.outputs.logspout-latest }}
+          git push
