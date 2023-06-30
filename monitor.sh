@@ -4,12 +4,29 @@ killlspid="${LSHC_KILLNOTDIE:-true}"
 launchdelay="${LSHC_RESTARTDELAY:-5}"
 retrylimit="${LSHC_RETRYLIMIT:-150}"
 sleeptime="${LSHC_SLEEPTIME:-0.1s}"
+waitlimit="${LSHC_WAITLIMIT:-3}"
+waitmonitoring="${LSHC_WAITMONITORING:-true}"
+waitsleep="${LSHC_WAITSLEEP:-90s}"
 
 function getlssendq () {
     #/bin/logspout pid
     lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
     if [ -n "${lspid}" ]; then
         lssendq=$(netstat -Wntp 2>/dev/null | grep "$lspid/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
+        if [ -n "${lssendq}" ]; then
+            if [ "${waitmonitoring}" = "true" ]; then
+                lsport=$(netstat -Wntp 2>/dev/null | grep "$lspid/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f5 | cut -d':' -f2)
+                if [ -n "$lsport" ]; then
+                    lswaits=$(netstat -Wntp 2>/dev/null | grep ":$lsport" | grep '_WAIT' | wc -l)
+                    [ "${debug}" = "2" ] && >&2 echo "lswaits=${lswaits}"
+                    if [ -n "$lswaits" ] && [ $lswaits -ge $waitlimit ]; then
+                        [ "${debug}" = "1" ] && >&2 echo "Changing lssendq from ${lssendq} to 'dead' due to lswaits=${lswaits}"
+                        lssendq="dead"
+                        sleep ${waitsleep}
+                    fi
+                fi
+            fi
+        fi
         echo "${lssendq}"
     else
         echo "dead"
@@ -28,6 +45,7 @@ function checklogspout () {
 
     if [ "${lssendq}" != "0" ]; then
         echo -n 'Timed out waiting for logspout to send data.  '
+        [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
         if [ "${killlspid}" = "true" ]; then
             echo 'Terminating logspout'
             lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
