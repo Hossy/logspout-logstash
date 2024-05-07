@@ -26,7 +26,7 @@ jobs:
 
     runs-on: ubuntu-latest
     permissions:
-      # contents: read
+      contents: write
       packages: write
 
     steps:
@@ -34,17 +34,23 @@ jobs:
       # https://github.com/docker/login-action
       - name: Log into registry ${{ env.REGISTRY }}
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v2.0.0
+        uses: docker/login-action@v3.1.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Build version tag
+      - name: Get version tag
+        id: versiontag
+        # run: echo "::set-output name=versiontag::$(date +'%Y.%m.%d.%H%M%S')"
+        run: echo "versiontag=$(date +'%Y.%m.%d.%H%M%S')" >> $GITHUB_OUTPUT
+
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v4.0.1
+        uses: docker/metadata-action@v5.5.1
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # set latest tag for master branch
@@ -54,7 +60,22 @@ jobs:
             type=ref,event=tag
             type=ref,event=pr
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.versiontag.outputs.versiontag }},enable={{is_default_branch}}
 
+      # Tag commit with version number
+      # https://github.com/actions/github-script
+      - name: Tag commit with version number
+        if: ${{ always() && format('refs/heads/{0}', github.event.repository.default_branch) == github.ref }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: 'refs/tags/${{ steps.versiontag.outputs.versiontag }}',
+              sha: context.sha
+            })
+      
       # Retrieve all repository tags from the GitHub API using undocumented API call to get all tags
       # https://github.com/actions/github-script
       - name: Get all tags
@@ -70,7 +91,7 @@ jobs:
       # https://github.com/mad9000/actions-find-and-replace-string
       - name: Format jq result
         id: formatted-jq
-        uses: mad9000/actions-find-and-replace-string@2
+        uses: mad9000/actions-find-and-replace-string@5
         with:
           source: ${{ steps.all-tags.outputs.result }}
           find: "'"
@@ -79,21 +100,21 @@ jobs:
       # Parse Github API output and search for tags only matching the current commit SHA 
       - name: Search all tags for commit
         id: tag-results
-        run: echo ::set-output name=tags::"$( echo '${{ steps.formatted-jq.outputs.value }}' | jq -r ".data | .[] | select( .commit.sha == \"${{ github.sha }}\" ) | .name" )"
+        run: echo tags="$( echo '${{ steps.formatted-jq.outputs.value }}' | jq -r ".data | .[] | select( .commit.sha == \"${{ github.sha }}\" ) | .name" )" >> $GITHUB_OUTPUT
       
       # Merge the tag lists from docker/metadata-action and GitHub API
       - name: Build tag list
         id: tag-list
         run: |
-          echo ::set-output name=tags::"$(
+          echo tags="$(
             echo -n "${{ steps.meta.outputs.tags }}" | tr '\n' ','
             for r in `echo "${{ steps.tag-results.outputs.tags }}" | tr '\n' ' '`; do echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$r | tr '[:upper:]' '[:lower:]'; done
-          )"
+          )" >> $GITHUB_OUTPUT
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action
       - name: Build and push Docker image
-        uses: docker/build-push-action@v3.0.0
+        uses: docker/build-push-action@v5.3.0
         with:
           # context: .
           push: ${{ github.event_name != 'pull_request' }}

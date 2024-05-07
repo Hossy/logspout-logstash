@@ -36,15 +36,17 @@ getlssendq () {
 
 checklogspout () {
     lssendq=$(getlssendq)
+    old_lssendq=${lssendq}
     n=0
-    while [ "${lssendq}" != "0" ] && [ $n -lt "${retrylimit}" ] && [ "${lssendq}" != "dead" ]; do
+    while [ "${lssendq}" != "0" ] && [ "${old_lssendq}" -le "${lssendq}" ] && [ $n -lt "${retrylimit}" ] && [ "${lssendq}" != "dead" ]; do
         sleep "${sleeptime}"
         [ "${debug}" = "1" ] && echo -n +
+        old_lssendq=${lssendq}
         lssendq=$(getlssendq)
         n=$(( n + 1 ))
     done
 
-    if [ "${lssendq}" != "0" ]; then
+    if [ "${lssendq}" != "0" ] && [ "${old_lssendq}" -le "${lssendq}" ]; then
         echo -n 'Timed out waiting for logspout to send data.  '
         [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
         if [ "${killlspid}" = "true" ]; then
