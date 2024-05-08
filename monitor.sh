@@ -11,7 +11,8 @@ waitsleep="${LSHC_WAITSLEEP:-90s}"
 
 getlssendq () {
     #/bin/logspout pid
-    lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
+    # lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
+    lspid=$(pgrep /bin/logspout)
     if [ -n "${lspid}" ]; then
         lssendq=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
         if [ -n "${lssendq}" ]; then
@@ -40,18 +41,22 @@ checklogspout () {
     n=0
     while [ "${lssendq}" != "0" ] && [ "${old_lssendq}" -le "${lssendq}" ] && [ $n -lt "${retrylimit}" ] && [ "${lssendq}" != "dead" ]; do
         sleep "${sleeptime}"
-        [ "${debug}" = "1" ] && echo -n +
+        # [ "${debug}" = "1" ] && echo -n +
+        [ "${debug}" = "1" ] && printf '+'
         old_lssendq=${lssendq}
         lssendq=$(getlssendq)
         n=$(( n + 1 ))
     done
 
     if [ "${lssendq}" != "0" ] && [ "${old_lssendq}" -le "${lssendq}" ]; then
-        echo -n 'Timed out waiting for logspout to send data.  '
-        [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
+        # echo -n 'Timed out waiting for logspout to send data.  '
+        printf 'Timed out waiting for logspout to send data.  '
+        # [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
+        [ "${debug}" = "1" ] && printf "lssendq=%s.  " "${lssendq}"
         if [ "${killlspid}" = "true" ]; then
             echo 'Terminating logspout'
-            lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
+            # lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
+            lspid=$(pgrep /bin/logspout)
             if [ -n "${lspid}" ]; then
                 kill "${lspid}"
                 sleep "${launchdelay}"
