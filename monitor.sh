@@ -2,6 +2,7 @@
 
 debug="${LSHC_DEBUGOUTPUT:-0}"
 killlspid="${LSHC_KILLNOTDIE:-true}"
+noaction="${LSHC_NOACTION:-false}"
 launchdelay="${LSHC_RESTARTDELAY:-5}"
 retrylimit="${LSHC_RETRYLIMIT:-150}"
 sleeptime="${LSHC_SLEEPTIME:-0.1s}"
@@ -39,7 +40,7 @@ checklogspout () {
     lssendq=$(getlssendq)
     old_lssendq=${lssendq}
     n=0
-    while [ "${lssendq}" != "0" ] && [ "${old_lssendq}" -le "${lssendq}" ] && [ $n -lt "${retrylimit}" ] && [ "${lssendq}" != "dead" ]; do
+    while [ "${lssendq}" != "0" ] && [ $n -lt "${retrylimit}" ] && [ "${lssendq}" != "dead" ] && [ "${old_lssendq}" -le "${lssendq}" ]; do
         sleep "${sleeptime}"
         # [ "${debug}" = "1" ] && echo -n +
         [ "${debug}" = "1" ] && printf '+'
@@ -48,24 +49,28 @@ checklogspout () {
         n=$(( n + 1 ))
     done
 
-    if [ "${lssendq}" != "0" ] && [ "${old_lssendq}" -le "${lssendq}" ]; then
-        # echo -n 'Timed out waiting for logspout to send data.  '
-        printf 'Timed out waiting for logspout to send data.  '
-        # [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
-        [ "${debug}" = "1" ] && printf "lssendq=%s.  " "${lssendq}"
-        if [ "${killlspid}" = "true" ]; then
-            echo 'Terminating logspout'
-            # lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
-            lspid=$(pgrep /bin/logspout)
-            if [ -n "${lspid}" ]; then
-                kill "${lspid}"
-                sleep "${launchdelay}"
-            fi
-            startlogspout
-        else
-            echo 'Exiting'
-            exit
+    if [ "${lssendq}" = "0" ] || [ "${old_lssendq}" -gt "${lssendq}" ]; then
+        return
+    fi
+
+    # echo -n 'Timed out waiting for logspout to send data.  '
+    printf 'Timed out waiting for logspout to send data.  '
+    # [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
+    [ "${debug}" = "1" ] && printf "lssendq=%s.  " "${lssendq}"
+    if [ "${noaction}" = "true" ]; then
+        echo 'Doing nothing per user request.'
+    elif [ "${killlspid}" = "true" ]; then
+        echo 'Terminating logspout'
+        # lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
+        lspid=$(pgrep /bin/logspout)
+        if [ -n "${lspid}" ]; then
+            kill "${lspid}"
+            sleep "${launchdelay}"
         fi
+        startlogspout
+    else
+        echo 'Exiting'
+        exit
     fi
 }
 
