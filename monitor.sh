@@ -17,12 +17,35 @@ getlssendq () {
     # lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
     lspid=$(pgrep /bin/logspout)
     if [ -n "${lspid}" ]; then
-        # lssendq=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
-        netstat_result=$(netstat -Wntp 2>/dev/null)
-        lssendq=$(echo "${netstat_result}" | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
+        n=0
+        # Check netstat up to three times with checkinterval duration in between checks
+        while [ "${n}" -lt 3 ]; do
+            n=$(( n + 1 ))
+            # lssendq=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
+            netstat_result=$(netstat -Wntp 2>/dev/null)
+            if [ -z "${netstat_result}" ]; then
+                sleep "${checkinterval}"
+                netstat_result=$(netstat -Wntp 2>/dev/null)
+            fi
+            if [ -z "${netstat_result}" ]; then
+                echo "empty netstat"
+                return
+            fi
+            # awk '!seen[$4,$5]++' is needed because sometimes netstat duplicates lines.  This deduplicates the lines based on source and destination.
+            # Example netstat output:
+            #   tcp        0 2422871 127.0.0.1:57858                                     127.0.0.1:5041                                      ESTABLISHED 6/logspout
+            #   tcp        0       0 10.42.142.135:9600                                  10.42.184.30:39544                                  TIME_WAIT   -
+            #   tcp        0 2380887 127.0.0.1:57858                                     127.0.0.1:5041                                      ESTABLISHED 6/logspout
+            lssendq=$(echo "${netstat_result}" | grep "${lspid}/logspout" | grep 'ESTABLISHED' | awk '!seen[$4,$5]++' | tr -s ' ' | cut -d' ' -f3)
+            if [ -z "${lssendq}" ]; then
+                sleep "${checkinterval}"
+            else
+                break
+            fi
+        done
         if [ "$(echo "${lssendq}" | wc -l)" -gt "1" ]; then
             echo 'Multiple logstash connections detected'
-            printf 'lspid=%s\nnetstat data:\n%s' "${lspid}" "${netstat_result}"
+            printf 'lspid=%s\nnetstat data:\n%s\n' "${lspid}" "${netstat_result}"
         elif [ -n "${lssendq}" ]; then
             if [ "${waitmonitoring}" = "true" ]; then
                 lsport=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f5 | cut -d':' -f2)
@@ -39,6 +62,7 @@ getlssendq () {
             echo "${lssendq}"
         else
             echo "no established connections"
+            printf 'lspid=%s\nnetstat data:\n%s\n' "${lspid}" "${netstat_result}"
         fi
     else
         echo "not running"
