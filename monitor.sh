@@ -17,24 +17,29 @@ getlssendq () {
     # lspid=$(ps | grep /bin/logspout | grep -v grep | tr -s ' ' | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' | cut -d' ' -f1)
     lspid=$(pgrep /bin/logspout)
     if [ -n "${lspid}" ]; then
-        lssendq=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
-        if [ -n "${lssendq}" ]; then
+        # lssendq=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
+        netstat_result=$(netstat -Wntp 2>/dev/null)
+        lssendq=$(echo "${netstat_result}" | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
+        if [ "$(echo "${lssendq}" | wc -l)" -gt "1" ]; then
+            echo 'Multiple logstash connections detected'
+            printf 'lspid=%s\nnetstat data:\n%s' "${lspid}" "${netstat_result}"
+        elif [ -n "${lssendq}" ]; then
             if [ "${waitmonitoring}" = "true" ]; then
                 lsport=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f5 | cut -d':' -f2)
                 if [ -n "${lsport}" ]; then
                     lswaits=$(netstat -Wntp 2>/dev/null | grep ":${lsport}" | grep -c '_WAIT')
-                    [ "${debug}" = "2" ] && >&2 echo "lswaits=${lswaits}"
+                    # [ "${debug}" = "2" ] && >&2 echo "lswaits=${lswaits}"
                     if [ -n "${lswaits}" ] && [ "${lswaits}" -ge "${waitlimit}" ]; then
-                        [ "${debug}" = "1" ] && >&2 echo "Changing lssendq from ${lssendq} to 'dead' due to lswaits=${lswaits}"
+                        # [ "${debug}" = "1" ] && >&2 echo "Changing lssendq from ${lssendq} to 'dead' due to lswaits=${lswaits}"
                         lssendq="time_wait"
                         sleep "${waitsleep}"
                     fi
                 fi
             fi
+            echo "${lssendq}"
         else
             echo "no established connections"
         fi
-        echo "${lssendq}"
     else
         echo "not running"
     fi
@@ -44,7 +49,7 @@ checklogspout () {
     lssendq=$(getlssendq)
     old_lssendq=${lssendq}
     n=0
-    while [ "${lssendq}" != "0" ] && [ $n -lt "${retrylimit}" ] && [ "${lssendq}" != "not running" ] && [ "${lssendq}" != "time_wait" ] && [ -n "${lssendq}" ] && [ "${old_lssendq}" -le "${lssendq}" ]; do
+    while [ -n "${lssendq}" ] && [ "${lssendq}" != "0" ] && [ "${n}" -lt "${retrylimit}" ] && expr "${lssendq}" : '^[0-9]\+$' >/dev/null 2>&1 && [ "${old_lssendq}" -le "${lssendq}" ]; do
         sleep "${sleeptime}"
         # [ "${debug}" = "1" ] && echo -n +
         [ "${debug}" = "1" ] && printf '+'
@@ -56,11 +61,11 @@ checklogspout () {
     if [ "${lssendq}" = "0" ]; then
         return
     fi
-    if [ -n "${old_lssendq}" ] && [ -n "${lssendq}" ] && expr "$old_lssendq" : '^[0-9]\+$' >/dev/null 2>&1 && expr "$lssendq" : '^[0-9]\+$' >/dev/null 2>&1 && [ "${old_lssendq}" -gt "${lssendq}" ]; then
+    if [ -n "${old_lssendq}" ] && [ -n "${lssendq}" ] && expr "${old_lssendq}" : '^[0-9]\+$' >/dev/null 2>&1 && expr "${lssendq}" : '^[0-9]\+$' >/dev/null 2>&1 && [ "${old_lssendq}" -gt "${lssendq}" ]; then
         return
     fi
 
-    if [ "${lssendq}" != "not running" ]; then
+    if [ "${lssendq}" = "not running" ]; then
         printf 'Found logspout not running.  '
         if [ "${killlspid}" = "true" ]; then
             echo 'Restarting logspout.'
@@ -72,7 +77,13 @@ checklogspout () {
     fi
 
     # echo -n 'Timed out waiting for logspout to send data.  '
-    printf 'Timed out waiting for logspout to send data.  '
+    printf 'Timed out waiting for logspout to send data.  Reason: '
+    if expr "${lssendq}" : '^[0-9]\+$' >/dev/null 2>&1; then
+        printf 'Send-Q'
+    else
+        printf '%s' "${lssendq}"
+    fi
+    printf '.  '
     # [ "${debug}" = "1" ] && echo -n "lssendq=${lssendq}.  "
     [ "${debug}" = "1" ] && printf "lssendq=%s.  " "${lssendq}"
     if [ "${noaction}" = "true" ]; then
@@ -97,17 +108,35 @@ startlogspout () {
     # shellcheck disable=SC2086  # Globbing on purpose
     /bin/logspout ${LSHC_LAUNCHARGS} &
     lspid=$!
+    echo "logspout PID = ${lspid}"
     echo 'Waiting for logspout to establish connection'
-    while ! netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep -q 'ESTABLISHED' ; do
+    while : ; do
+        if test -d /proc/${lspid}; then
+            if netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep -q 'ESTABLISHED'; then
+                echo 'Connection established'
+                break
+            fi
+        else
+            echo 'logspout died before establishing a connection'
+            break
+        fi
+        [ "${debug}" = "1" ] && echo c
         sleep "${checkinterval}"
     done
-    sleep "${launchdelay}"
+    if test -d /proc/${lspid}; then
+        [ "${debug}" = "1" ] && echo l
+        sleep "${launchdelay}"
+    else
+        echo 'logspout failed to stay running. Exiting.'
+        exit
+    fi
+    echo 'logspout started'
 }
 
 startlogspout
 
 echo 'Beginning monitor'
-while true; do
+while : ; do
     sleep "${checkinterval}"
     [ "${debug}" = "1" ] && echo .
     checklogspout
