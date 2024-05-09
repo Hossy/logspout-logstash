@@ -44,7 +44,14 @@ jobs:
       - name: Get version tag
         id: versiontag
         # run: echo "::set-output name=versiontag::$(date +'%Y.%m.%d.%H%M%S')"
-        run: echo "versiontag=$(date +'%Y.%m.%d.%H%M%S')" >> $GITHUB_OUTPUT
+        # run: echo "versiontag=$(date +'%Y.%m.%d.%H%M%S')" >> $GITHUB_OUTPUT
+        run: |
+          echo "versiontag=$(
+            eval "$(date +'today=%F SYM_VER_PREFIX=%Y.%m.%d now=%s')"
+            eval "$(date -d "${today} 0" +'midnight=%s')"
+            SYM_VER_PATCH=$((now - midnight))
+            echo "${SYM_VER_PREFIX}.${SYM_VER_PATCH}"
+          )" >> $GITHUB_OUTPUT
 
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action

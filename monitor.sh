@@ -23,34 +23,29 @@ getlssendq () {
             n=$(( n + 1 ))
             # lssendq=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f3)
             netstat_result=$(netstat -Wntp 2>/dev/null)
-            if [ -z "${netstat_result}" ]; then
-                sleep "${checkinterval}"
-                netstat_result=$(netstat -Wntp 2>/dev/null)
+            if [ -n "${netstat_result}" ]; then
+                # awk '!seen[$4,$5]++' is needed because sometimes netstat duplicates lines.  This deduplicates the lines based on source and destination.
+                # Example netstat output:
+                #   tcp        0 2422871 127.0.0.1:57858                                     127.0.0.1:5041                                      ESTABLISHED 6/logspout
+                #   tcp        0       0 10.42.142.135:9600                                  10.42.184.30:39544                                  TIME_WAIT   -
+                #   tcp        0 2380887 127.0.0.1:57858                                     127.0.0.1:5041                                      ESTABLISHED 6/logspout
+                lssendq=$(echo "${netstat_result}" | awk -v lspid="${lspid}" '$NF == lspid"/logspout" && $(NF-1) == "ESTABLISHED" && !seen[$4,$5]++ { print }' | tr -s ' ' | cut -d' ' -f3)
+                if [ -n "${lssendq}" ]; then
+                    break
+                fi
             fi
-            if [ -z "${netstat_result}" ]; then
-                echo "empty netstat"
-                return
-            fi
-            # awk '!seen[$4,$5]++' is needed because sometimes netstat duplicates lines.  This deduplicates the lines based on source and destination.
-            # Example netstat output:
-            #   tcp        0 2422871 127.0.0.1:57858                                     127.0.0.1:5041                                      ESTABLISHED 6/logspout
-            #   tcp        0       0 10.42.142.135:9600                                  10.42.184.30:39544                                  TIME_WAIT   -
-            #   tcp        0 2380887 127.0.0.1:57858                                     127.0.0.1:5041                                      ESTABLISHED 6/logspout
-            lssendq=$(echo "${netstat_result}" | grep "${lspid}/logspout" | grep 'ESTABLISHED' | awk '!seen[$4,$5]++' | tr -s ' ' | cut -d' ' -f3)
-            if [ -z "${lssendq}" ]; then
-                sleep "${checkinterval}"
-            else
-                break
-            fi
+            sleep "${checkinterval}"
         done
-        if [ "$(echo "${lssendq}" | wc -l)" -gt "1" ]; then
-            echo 'Multiple logstash connections detected'
-            printf 'lspid=%s\nnetstat data:\n%s\n' "${lspid}" "${netstat_result}"
-        elif [ -n "${lssendq}" ]; then
-            if [ "${waitmonitoring}" = "true" ]; then
-                lsport=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f5 | cut -d':' -f2)
+        if [ -n "${lssendq}" ]; then
+            if [ "$(echo "${lssendq}" | wc -l)" -gt "1" ]; then
+                echo 'Multiple logstash connections detected'
+                printf 'lspid=%s\nnetstat data:\n%s\n' "${lspid}" "${netstat_result}"
+            elif [ "${waitmonitoring}" = "true" ]; then
+                # lsport=$(netstat -Wntp 2>/dev/null | grep "${lspid}/logspout" | grep 'ESTABLISHED' | tr -s ' ' | cut -d' ' -f5 | cut -d':' -f2)
+                lsport=$(netstat -Wntp 2>/dev/null | awk -v lspid="${lspid}" '$NF == lspid"/logspout" && $(NF-1) == "ESTABLISHED" && !seen[$4,$5]++ { split($5, port, ":"); print port[2] }')
                 if [ -n "${lsport}" ]; then
-                    lswaits=$(netstat -Wntp 2>/dev/null | grep ":${lsport}" | grep -c '_WAIT')
+                    # lswaits=$(netstat -Wntp 2>/dev/null | grep ":${lsport}" | grep -c '_WAIT')
+                    lswaits=$(netstat -Wntp 2>/dev/null | awk -v lsport="${lsport}" '$5 ~ ":"lsport"$" && $(NF-1) ~ "_WAIT$" && !seen[$4,$5]++ { count++ } END { print count }')
                     # [ "${debug}" = "2" ] && >&2 echo "lswaits=${lswaits}"
                     if [ -n "${lswaits}" ] && [ "${lswaits}" -ge "${waitlimit}" ]; then
                         # [ "${debug}" = "1" ] && >&2 echo "Changing lssendq from ${lssendq} to 'dead' due to lswaits=${lswaits}"
