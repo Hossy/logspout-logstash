@@ -17,7 +17,8 @@ jobs:
       - name: Fetch latest release version of Logspout
         id: logspout_ver
         run: |
-          curl -sL https://api.github.com/repos/gliderlabs/logspout/releases/latest | \
+          # curl -sL https://api.github.com/repos/gliderlabs/logspout/releases/latest | \
+          curl -sL https://api.github.com/repos/Hossy/logspout/releases/latest | \
           jq -r ".tag_name" > logspout-latest.txt
           echo ::set-output name=logspout-latest::$(cat logspout-latest.txt)
 
