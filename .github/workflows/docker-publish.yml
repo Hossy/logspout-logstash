@@ -133,11 +133,14 @@ jobs:
       - name: Search all tags for commit
         id: tag-results
         run: |
+          tags=""
           for tag in $( echo '${{ steps.formatted-jq.outputs.value }}' | jq -r ".data | .[] | select( .commit.sha == \"${GITHUB_SHA}\" ) | .name" ); do
             echo "Discovered tag: ${tag}"
-            echo tags="${tag}" >> temp_output.txt
+            tags="${tags},${tag}"
           done
-          cat temp_output.txt >> $GITHUB_OUTPUT
+          # Remove leading comma and write to GITHUB_OUTPUT
+          tags="${tags#,}"  # Removes the leading comma
+          echo "tags=${tags}" >> $GITHUB_OUTPUT
       
       # Merge the tag lists from docker/metadata-action and GitHub API
       - name: Build tag list
