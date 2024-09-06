@@ -1,4 +1,4 @@
-FROM gliderlabs/logspout:master
+FROM ghcr.io/hossy/logspout:master
 
 ENTRYPOINT ["/monitor.sh"]
 

@@ -13,7 +13,7 @@ on:
     paths-ignore: [ '.github/**' ]
   pull_request:
     branches: [ master ]
-  # workflow_dispatch:
+  workflow_dispatch:
 
 env:
   # Use docker.io for Docker Hub if empty
@@ -69,6 +69,31 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.versiontag.outputs.versiontag }},enable={{is_default_branch}}
 
+      # Get the latest release commit hash
+      - name: Get the latest release info
+        id: latest-release
+        run: |
+          curl -sL https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r ".target_commitish" > latest_release_commit.txt
+          echo 'Latest release commit hash:' $(cat latest_release_commit.txt)
+
+      # Get current commit hash
+      - name: Get current commit hash
+        id: current-commit
+        run: echo "current_commit=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+
+      # Compare the commit hashes
+      - name: Check if latest release is from the same commit
+        id: release-needed
+        run: |
+          latest_release_commit=$(cat latest_release_commit.txt)
+          if [ "${{ steps.current-commit.outputs.current_commit }}" = "$latest_release_commit" ]; then
+            echo "No release needed, commits are the same"
+            echo "release_needed=false" >> $GITHUB_ENV
+          else
+            echo "New release needed"
+            echo "release_needed=true" >> $GITHUB_ENV
+          fi
+
       # Tag commit with version number
       # https://github.com/actions/github-script
       - name: Tag commit with version number
@@ -115,7 +140,13 @@ jobs:
         run: |
           echo tags="$(
             echo -n "${{ steps.meta.outputs.tags }}" | tr '\n' ','
-            for r in `echo "${{ steps.tag-results.outputs.tags }}" | tr '\n' ' '`; do echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$r | tr '[:upper:]' '[:lower:]'; done
+            for r in `echo "${{ steps.tag-results.outputs.tags }}" | tr '\n' ' '`; do
+              echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$r | tr '[:upper:]' '[:lower:]'
+            done
+            # Add the master tag if the branch is master
+            if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+              echo -n ,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master | tr '[:upper:]' '[:lower:]'
+            fi
           )" >> $GITHUB_OUTPUT
 
       # Build and push Docker image with Buildx (don't push on PR)
@@ -127,3 +158,16 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tag-list.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Create GitHub Release only if needed
+      - name: Create GitHub Release
+        if: env.release_needed == 'true'
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.versiontag.outputs.versiontag }}
+          release_name: "Release ${{ steps.versiontag.outputs.versiontag }}"
+          body: "Automatically generated release."
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
