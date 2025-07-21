@@ -20,11 +20,12 @@ jobs:
           # curl -sL https://api.github.com/repos/gliderlabs/logspout/releases/latest | \
           curl -sL https://api.github.com/repos/Hossy/logspout/releases/latest | \
           jq -r ".tag_name" > logspout-latest.txt
-          echo ::set-output name=logspout-latest::$(cat logspout-latest.txt)
+          echo "logspout-latest=$(cat logspout-latest.txt)" >> $GITHUB_OUTPUT
 
       - name: Check for modified files
         id: git-check
-        run: echo ::set-output name=modified::$([ -z "`git status --porcelain`" ] && echo "false" || echo "true")
+        run: |
+          echo "modified=$([ -z "$(git status --porcelain)" ] && echo "false" || echo "true")" >> $GITHUB_OUTPUT
 
       - name: Commit latest release version
         if: steps.git-check.outputs.modified == 'true'
