@@ -19,28 +19,28 @@ jobs:
         run: |
           # curl -sL https://api.github.com/repos/gliderlabs/logspout/releases/latest | \
           response=$(curl -sL -w "%{http_code}" https://api.github.com/repos/Hossy/logspout/releases/latest)
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed -e '$d')
+          http_code=$(echo "${response}" | tail -n1)
+          body=$(echo "${response}" | sed -e '$d')
           
-          if [ "$http_code" -ne 200 ]; then
-            echo "Error: Failed to fetch latest release (HTTP $http_code)"
+          if [ "${http_code}" -ne 200 ]; then
+            echo "Error: Failed to fetch latest release (HTTP ${http_code})"
             exit 1
           fi
           
-          tag_name=$(echo "$body" | jq -r ".tag_name")
-          if [ -z "$tag_name" ] || [ "$tag_name" = "null" ]; then
+          tag_name=$(echo "${body}" | jq -r ".tag_name")
+          if [ -z "${tag_name}" ] || [ "${tag_name}" = "null" ]; then
             echo "Error: No valid tag_name found in response"
             exit 1
           fi
           
-          echo "Latest tag name: $tag_name"
+          echo "Latest tag name: ${tag_name}"
           echo "${tag_name}" > logspout-latest.txt
-          echo "logspout-latest=${tag_name}" >> $GITHUB_OUTPUT
+          echo "logspout-latest=${tag_name}" >> "${GITHUB_OUTPUT}"
 
       - name: Check for modified files
         id: git-check
         run: |
-          echo "modified=$([ -z "$(git status --porcelain)" ] && echo "false" || echo "true")" >> $GITHUB_OUTPUT
+          echo "modified=$([ -z "$(git status --porcelain)" ] && echo "false" || echo "true")" >> "${GITHUB_OUTPUT}"
 
       - name: Commit latest release version
         if: steps.git-check.outputs.modified == 'true'
