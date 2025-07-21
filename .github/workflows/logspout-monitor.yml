@@ -9,7 +9,7 @@ jobs:
     steps:
       # https://github.com/actions/checkout
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         # https://stackoverflow.com/questions/67550727/push-event-doesnt-trigger-workflow-on-push-paths-github-actions
         with:
           token: ${{ secrets.BUILD_AUTOMATION_TOKEN }}
@@ -18,9 +18,24 @@ jobs:
         id: logspout_ver
         run: |
           # curl -sL https://api.github.com/repos/gliderlabs/logspout/releases/latest | \
-          curl -sL https://api.github.com/repos/Hossy/logspout/releases/latest | \
-          jq -r ".tag_name" > logspout-latest.txt
-          echo "logspout-latest=$(cat logspout-latest.txt)" >> $GITHUB_OUTPUT
+          response=$(curl -sL -w "%{http_code}" https://api.github.com/repos/Hossy/logspout/releases/latest)
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed -e '$d')
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Error: Failed to fetch latest release (HTTP $http_code)"
+            exit 1
+          fi
+          
+          tag_name=$(echo "$body" | jq -r ".tag_name")
+          if [ -z "$tag_name" ] || [ "$tag_name" = "null" ]; then
+            echo "Error: No valid tag_name found in response"
+            exit 1
+          fi
+          
+          echo "Latest tag name: $tag_name"
+          echo "${tag_name}" > logspout-latest.txt
+          echo "logspout-latest=${tag_name}" >> $GITHUB_OUTPUT
 
       - name: Check for modified files
         id: git-check
